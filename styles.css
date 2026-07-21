@@ -14,6 +14,9 @@
 
 * { box-sizing: border-box; }
 
+/* The [hidden] attribute must always win, even over display:flex/grid below. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
