@@ -2,6 +2,13 @@
 // Runs entirely in the browser. Uses Tesseract.js for OCR, then uses the
 // horizontal position of each line of text to guess who said it (Me vs Them).
 
+// Register the service worker so the app is installable / loads offline-ish.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
 const dropzone   = document.getElementById('dropzone');
 const fileInput  = document.getElementById('fileInput');
 const statusEl   = document.getElementById('status');
