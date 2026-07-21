@@ -1,6 +1,7 @@
 // Chat Screenshot → Text
 // Runs entirely in the browser. Uses Tesseract.js for OCR, then uses the
-// horizontal position of each line of text to guess who said it (Me vs Them).
+// horizontal position of each line of text to guess who said it (Me vs Them),
+// and cleans out timestamps / status-bar / app junk.
 
 // Register the service worker so the app is installable / loads offline-ish.
 if ('serviceWorker' in navigator) {
@@ -20,6 +21,15 @@ const copyBtn    = document.getElementById('copyBtn');
 const resetBtn   = document.getElementById('resetBtn');
 const mySideSel  = document.getElementById('mySide');
 const showLabels = document.getElementById('showLabels');
+const cleanJunk  = document.getElementById('cleanJunk');
+const myNameEl   = document.getElementById('myName');
+const theirNameEl = document.getElementById('theirName');
+
+// Remember the names between visits so you only type them once.
+myNameEl.value    = localStorage.getItem('myName') || '';
+theirNameEl.value = localStorage.getItem('theirName') || '';
+myNameEl.addEventListener('input', () => localStorage.setItem('myName', myNameEl.value));
+theirNameEl.addEventListener('input', () => localStorage.setItem('theirName', theirNameEl.value));
 
 // --- Upload interactions ---------------------------------------------------
 
@@ -56,9 +66,11 @@ document.addEventListener('paste', (e) => {
   }
 });
 
-// Re-run if the user changes options after a result is already shown
-mySideSel.addEventListener('change', reRenderIfPossible);
-showLabels.addEventListener('change', reRenderIfPossible);
+// Re-run render if the user changes options after a result is already shown
+[mySideSel, showLabels, cleanJunk].forEach((el) =>
+  el.addEventListener('change', reRenderIfPossible));
+[myNameEl, theirNameEl].forEach((el) =>
+  el.addEventListener('input', reRenderIfPossible));
 
 resetBtn.addEventListener('click', () => {
   results.hidden = true;
@@ -82,7 +94,21 @@ copyBtn.addEventListener('click', async () => {
   }, 1600);
 });
 
-// --- OCR + processing ------------------------------------------------------
+// --- OCR engine (created once, reused for speed) ---------------------------
+
+let workerPromise = null;
+function getWorker() {
+  if (!workerPromise) {
+    workerPromise = Tesseract.createWorker('eng', 1, {
+      logger: (m) => {
+        if (m.status === 'recognizing text') {
+          statusText.textContent = `Reading your screenshot… ${Math.round(m.progress * 100)}%`;
+        }
+      },
+    });
+  }
+  return workerPromise;
+}
 
 let lastLines = null;        // cached OCR lines so option changes re-render instantly
 let lastImageWidth = 0;
@@ -100,15 +126,9 @@ async function handleFile(file) {
   statusText.textContent = 'Reading your screenshot…';
 
   try {
-    const { data } = await Tesseract.recognize(file, 'eng', {
-      logger: (m) => {
-        if (m.status === 'recognizing text') {
-          statusText.textContent = `Reading your screenshot… ${Math.round(m.progress * 100)}%`;
-        }
-      },
-    });
+    const worker = await getWorker();
+    const { data } = await worker.recognize(file);
 
-    // Prefer full image width from the recognized page; fall back to the image element.
     lastImageWidth = data?.imageWidth || preview.naturalWidth || 1000;
     lastLines = (data.lines || [])
       .map((ln) => ({
@@ -122,9 +142,6 @@ async function handleFile(file) {
   } catch (err) {
     statusText.textContent = 'Something went wrong reading that image. Try another screenshot.';
     console.error(err);
-    return;
-  } finally {
-    // keep status visible only until render() shows results
   }
 }
 
@@ -132,42 +149,122 @@ function reRenderIfPossible() {
   if (lastLines) render();
 }
 
+// --- Junk cleaning ---------------------------------------------------------
+
+// Timestamp patterns that can appear on their own line OR tacked onto the end
+// of a message, e.g. "Jul 20 7:57 PM".
+const MONTHS = 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
+const DATE_TIME_RE = new RegExp(
+  `\\b(?:${MONTHS})[a-z]*\\.?\\s+\\d{1,2}(?:,)?\\s+\\d{1,2}:\\d{2}\\s*[ap]\\.?m\\.?`, 'gi');
+const TIME_RE      = /\b\d{1,2}:\d{2}\s*[ap]\.?m\.?\b/gi;              // 7:57 PM
+const DATE_ONLY_RE = new RegExp(`\\b(?:${MONTHS})[a-z]*\\.?\\s+\\d{1,2}\\b`, 'gi');
+const REL_DATE_RE  = /\b(today|yesterday|mon|tue|wed|thu|fri|sat|sun)[a-z]*,?\s*\d{1,2}:\d{2}\s*[ap]\.?m\.?/gi;
+
+// Whole lines that are pure UI chrome and should be dropped entirely.
+const JUNK_LINE_RE = /^(online|active now|typing\.?\.?\.?|type a message|delivered|read|sent|seen|now|new match|it'?s a match|you matched|say something|send a message|message|back)$/i;
+const STATUS_BAR_RE = /\b(lte|5g|4g|3g|wi-?fi|edge)\b/i;
+
+function cleanLine(raw) {
+  let s = raw;
+
+  // Strip timestamps/dates anywhere in the line.
+  s = s.replace(REL_DATE_RE, ' ')
+       .replace(DATE_TIME_RE, ' ')
+       .replace(TIME_RE, ' ')
+       .replace(DATE_ONLY_RE, ' ');
+
+  // Strip a trailing "Type a message ..." footer and anything after it.
+  s = s.replace(/type a message.*/i, ' ');
+
+  // Remove read-receipt checkmarks and stray symbol clutter, but keep normal
+  // punctuation and emoji-ish characters that belong to real messages.
+  s = s.replace(/[✓✔»«•·|©®™]+/g, ' ');
+
+  // Collapse whitespace.
+  s = s.replace(/\s{2,}/g, ' ').trim();
+
+  return s;
+}
+
+// Decide whether a whole line is junk we should drop.
+function isJunkLine(raw, x0, x1, imageWidth) {
+  const s = raw.trim();
+  if (!s) return true;
+
+  // Status bar clock like "20:44" or "9:41" usually sits at the very top and
+  // alongside signal/battery text.
+  if (STATUS_BAR_RE.test(s)) return true;
+
+  // Pure UI words.
+  if (JUNK_LINE_RE.test(s)) return true;
+
+  // After removing letters/spaces, if almost nothing but symbols/numbers is
+  // left, it's icon/emoji garbage (e.g. the bottom nav row).
+  const letters = s.replace(/[^a-z]/gi, '');
+  if (letters.length <= 1 && s.length <= 4) return true;
+
+  return false;
+}
+
+// --- Rendering -------------------------------------------------------------
+
 function render() {
   statusEl.hidden = true;
   results.hidden = false;
 
-  const messages = groupIntoMessages(lastLines, lastImageWidth);
+  const doClean = cleanJunk.checked;
   const useLabels = showLabels.checked;
   const mineIsRight = mySideSel.value === 'right';
+  const meLabel   = (myNameEl.value.trim() || 'Me');
+  const themLabel = (theirNameEl.value.trim() || 'Them');
 
+  // 1) Filter + clean each line.
+  const cleaned = [];
+  for (const ln of lastLines) {
+    if (doClean && isJunkLine(ln.text, ln.x0, ln.x1, lastImageWidth)) continue;
+    const text = doClean ? cleanLine(ln.text) : ln.text;
+    if (!text) continue;
+    // Drop residue left after stripping timestamps (e.g. a lone "v" checkmark).
+    if (doClean) {
+      const letters = text.replace(/[^a-z]/gi, '');
+      if (letters.length <= 1 && text.length <= 3) continue;
+    }
+    cleaned.push({ ...ln, text });
+  }
+
+  // 2) Group into messages by which side the bubble is aligned to.
+  const messages = groupIntoMessages(cleaned, lastImageWidth);
+
+  // 3) Build output.
   const blocks = messages.map((msg) => {
     if (!useLabels) return msg.text;
     const isMine = mineIsRight ? (msg.side === 'right') : (msg.side === 'left');
-    const label = isMine ? 'Me' : 'Them';
-    return `${label}: ${msg.text}`;
+    return `${isMine ? meLabel : themLabel}: ${msg.text}`;
   });
 
   output.value = blocks.join('\n\n');
 }
 
-// Group lines into messages by which side of the image they sit on,
-// merging consecutive lines from the same side into one bubble.
+// Group lines into messages. We classify each line by ALIGNMENT (is the text
+// hugging the left edge or the right edge?) rather than by its center, which is
+// far more reliable for wide chat bubbles. Consecutive same-side lines merge
+// into one message.
 function groupIntoMessages(lines, imageWidth) {
-  const mid = imageWidth / 2;
   const messages = [];
 
   for (const ln of lines) {
-    const center = (ln.x0 + ln.x1) / 2;
-    const width  = ln.x1 - ln.x0;
+    const marginLeft  = ln.x0;
+    const marginRight = imageWidth - ln.x1;
+    const width       = ln.x1 - ln.x0;
 
-    // A line spanning most of the image is likely a header/timestamp, not a
-    // one-sided bubble — treat it as "center" and attach to whatever came before.
-    const isFullWidth = width > imageWidth * 0.72;
     let side;
-    if (isFullWidth) {
+    if (width > imageWidth * 0.82) {
+      // Spans almost the whole width — can't tell a side; attach to previous.
       side = messages.length ? messages[messages.length - 1].side : 'left';
     } else {
-      side = center >= mid ? 'right' : 'left';
+      // Smaller left margin => left-aligned bubble (Them);
+      // smaller right margin => right-aligned bubble (Me).
+      side = marginLeft <= marginRight ? 'left' : 'right';
     }
 
     const prev = messages[messages.length - 1];
@@ -178,5 +275,7 @@ function groupIntoMessages(lines, imageWidth) {
     }
   }
 
-  return messages;
+  // Tidy each message's internal spacing.
+  messages.forEach((m) => { m.text = m.text.replace(/\s{2,}/g, ' ').trim(); });
+  return messages.filter((m) => m.text.length > 0);
 }

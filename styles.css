@@ -68,7 +68,8 @@ main {
 }
 .opt { display: inline-flex; align-items: center; gap: 8px; }
 .opt.checkbox { cursor: pointer; }
-.options select {
+.options select,
+.options input[type="text"] {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--border);
@@ -76,6 +77,10 @@ main {
   padding: 6px 10px;
   font-size: .95rem;
 }
+.options input[type="text"] {
+  width: 120px;
+}
+.options input[type="text"]::placeholder { color: #6b7192; }
 
 /* Status */
 .status {

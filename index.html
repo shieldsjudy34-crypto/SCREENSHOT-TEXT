@@ -37,6 +37,14 @@
     <!-- Options -->
     <section class="options">
       <label class="opt">
+        <span>Your name</span>
+        <input type="text" id="myName" placeholder="Me" autocomplete="off" />
+      </label>
+      <label class="opt">
+        <span>Their name</span>
+        <input type="text" id="theirName" placeholder="Them" autocomplete="off" />
+      </label>
+      <label class="opt">
         <span>My messages are on the</span>
         <select id="mySide">
           <option value="right" selected>Right side</option>
@@ -45,7 +53,11 @@
       </label>
       <label class="opt checkbox">
         <input type="checkbox" id="showLabels" checked />
-        <span>Label who said what (Me / Them)</span>
+        <span>Label who said what</span>
+      </label>
+      <label class="opt checkbox">
+        <input type="checkbox" id="cleanJunk" checked />
+        <span>Remove timestamps &amp; app junk</span>
       </label>
     </section>
 
