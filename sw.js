@@ -1,6 +1,6 @@
 // Minimal service worker: caches the app shell so the page loads instantly on
 // repeat visits and qualifies as an installable app on Android.
-const CACHE = 'chat2text-v2';
+const CACHE = 'chat2text-v3';
 const SHELL = [
   './',
   './index.html',

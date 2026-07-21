@@ -135,6 +135,8 @@ async function handleFile(file) {
         text: (ln.text || '').trim(),
         x0: ln.bbox?.x0 ?? 0,
         x1: ln.bbox?.x1 ?? 0,
+        y0: ln.bbox?.y0 ?? 0,
+        y1: ln.bbox?.y1 ?? 0,
       }))
       .filter((ln) => ln.text.length > 0);
 
@@ -176,14 +178,32 @@ function cleanLine(raw) {
   // Strip a trailing "Type a message ..." footer and anything after it.
   s = s.replace(/type a message.*/i, ' ');
 
-  // Remove read-receipt checkmarks and stray symbol clutter, but keep normal
-  // punctuation and emoji-ish characters that belong to real messages.
+  // Remove read-receipt checkmarks and stray symbol clutter.
   s = s.replace(/[✓✔»«•·|©®™]+/g, ' ');
+
+  // Drop icon / emoji gibberish: keep only word-like tokens (real letters).
+  s = stripGibberish(s);
 
   // Collapse whitespace.
   s = s.replace(/\s{2,}/g, ' ').trim();
 
   return s;
+}
+
+// Keep only word-like tokens and throw away icon/emoji junk (e.g. "(@]", "Gs",
+// "[=]"). A token is kept if it's a number, or contains a real vowel-ish
+// letter, or is the standalone word "I"/"a". Vowel set includes "y" so words
+// like "my", "by", "cry" survive.
+function stripGibberish(s) {
+  return s.split(/\s+/).filter((tok) => {
+    if (!tok) return false;
+    if (/^\d[\d.,:%$]*$/.test(tok)) return true;      // numbers like 12, 7:50
+    const core = tok.replace(/[^a-z]/gi, '');
+    if (core.length === 0) return false;              // pure symbols/brackets
+    if (/[aeiouy]/i.test(core)) return true;          // has a vowel -> a word
+    if (core.length === 1 && /[ia]/i.test(core)) return true; // "I", "a"
+    return false;                                     // vowelless cluster = junk
+  }).join(' ');
 }
 
 // Decide whether a whole line is junk we should drop.
@@ -202,6 +222,9 @@ function isJunkLine(raw, x0, x1, imageWidth) {
   // left, it's icon/emoji garbage (e.g. the bottom nav row).
   const letters = s.replace(/[^a-z]/gi, '');
   if (letters.length <= 1 && s.length <= 4) return true;
+
+  // Lines that are mostly symbols (low letter ratio) are icon rows.
+  if (s.length >= 3 && letters.length / s.length < 0.4) return true;
 
   return false;
 }
@@ -245,33 +268,62 @@ function render() {
   output.value = blocks.join('\n\n');
 }
 
-// Group lines into messages. We classify each line by ALIGNMENT (is the text
-// hugging the left edge or the right edge?) rather than by its center, which is
-// far more reliable for wide chat bubbles. Consecutive same-side lines merge
-// into one message.
+// Group lines into messages.
+//
+// Speaker detection uses where each bubble SITS on screen, not per-line text
+// alignment. Left-side bubbles (Them) start hard against the screen's left
+// edge; right-side bubbles (Me) are pushed inward, so their text starts
+// noticeably indented from the left — even the short last line of a wrapped
+// message. So we find the leftmost text position in the image (the left
+// bubbles' margin) and call anything clearly indented past it the other side.
+//
+// We also split same-side bubbles apart when there's a big vertical gap between
+// them, so two separate messages from the same person don't get glued together.
 function groupIntoMessages(lines, imageWidth) {
-  const messages = [];
+  if (!lines.length) return [];
 
+  // Find where to split "left column" (Them) from "right column" (Me). Text
+  // sits in two vertical columns; we detect the biggest horizontal gap between
+  // where lines start (x0) and split there. This adapts to each app's layout
+  // instead of assuming a fixed indent.
+  const leftEdge = Math.min(...lines.map((l) => l.x0));
+  const starts = lines
+    .filter((l) => (l.x1 - l.x0) <= imageWidth * 0.82)
+    .map((l) => l.x0)
+    .sort((a, b) => a - b);
+  let indentThreshold = leftEdge + imageWidth * 0.06;
+  let maxGap = 0;
+  for (let i = 1; i < starts.length; i++) {
+    const gap = starts[i] - starts[i - 1];
+    if (gap > maxGap) { maxGap = gap; indentThreshold = (starts[i] + starts[i - 1]) / 2; }
+  }
+  // If there's no clear two-column gap (e.g. all one speaker), use a default.
+  if (maxGap < imageWidth * 0.04) indentThreshold = leftEdge + imageWidth * 0.06;
+
+  // Typical line height, for detecting gaps between separate bubbles.
+  const heights = lines.map((l) => l.y1 - l.y0).filter((h) => h > 0).sort((a, b) => a - b);
+  const lineH = heights.length ? heights[Math.floor(heights.length / 2)] : 20;
+
+  const messages = [];
   for (const ln of lines) {
-    const marginLeft  = ln.x0;
-    const marginRight = imageWidth - ln.x1;
-    const width       = ln.x1 - ln.x0;
+    const width = ln.x1 - ln.x0;
 
     let side;
     if (width > imageWidth * 0.82) {
       // Spans almost the whole width — can't tell a side; attach to previous.
       side = messages.length ? messages[messages.length - 1].side : 'left';
     } else {
-      // Smaller left margin => left-aligned bubble (Them);
-      // smaller right margin => right-aligned bubble (Me).
-      side = marginLeft <= marginRight ? 'left' : 'right';
+      side = ln.x0 <= indentThreshold ? 'left' : 'right';
     }
 
     const prev = messages[messages.length - 1];
-    if (prev && prev.side === side) {
+    const bigGap = prev && (ln.y0 - prev.y1) > lineH * 1.6;
+
+    if (prev && prev.side === side && !bigGap) {
       prev.text += ' ' + ln.text;
+      prev.y1 = ln.y1;
     } else {
-      messages.push({ side, text: ln.text });
+      messages.push({ side, text: ln.text, y1: ln.y1 });
     }
   }
 
