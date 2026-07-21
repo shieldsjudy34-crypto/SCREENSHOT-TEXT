@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat Screenshot → Text</title>
+  <meta name="description" content="Upload a chat screenshot, get clean copyable text labeled Me vs Them." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>📸 Chat Screenshot → Text</h1>
+    <p class="tagline">Upload a screenshot of your chat. Get clean, labeled text you can copy &amp; paste. Everything stays on your device — nothing is uploaded anywhere.</p>
+  </header>
+
+  <main>
+    <!-- Upload / drop zone -->
+    <section id="dropzone" class="dropzone" tabindex="0" aria-label="Upload a chat screenshot">
+      <input type="file" id="fileInput" accept="image/*" hidden />
+      <div class="dropzone-inner">
+        <div class="drop-icon">⬆️</div>
+        <p class="drop-title">Drag &amp; drop a screenshot here</p>
+        <p class="drop-sub">or <span class="link">click to choose an image</span> · or paste with Ctrl/Cmd+V</p>
+      </div>
+    </section>
+
+    <!-- Options -->
+    <section class="options">
+      <label class="opt">
+        <span>My messages are on the</span>
+        <select id="mySide">
+          <option value="right" selected>Right side</option>
+          <option value="left">Left side</option>
+        </select>
+      </label>
+      <label class="opt checkbox">
+        <input type="checkbox" id="showLabels" checked />
+        <span>Label who said what (Me / Them)</span>
+      </label>
+    </section>
+
+    <!-- Progress -->
+    <section id="status" class="status" hidden>
+      <div class="spinner"></div>
+      <span id="statusText">Reading your screenshot…</span>
+    </section>
+
+    <!-- Preview + Result -->
+    <section id="results" class="results" hidden>
+      <div class="col preview-col">
+        <h2>Your screenshot</h2>
+        <img id="preview" alt="Uploaded screenshot preview" />
+      </div>
+      <div class="col output-col">
+        <div class="output-head">
+          <h2>Extracted chat</h2>
+          <div class="actions">
+            <button id="copyBtn" class="btn primary">📋 Copy text</button>
+            <button id="resetBtn" class="btn ghost">↺ New image</button>
+          </div>
+        </div>
+        <textarea id="output" spellcheck="false" aria-label="Extracted chat text"></textarea>
+        <p class="hint">Tip: OCR isn't perfect. You can edit the text above before copying. If Me/Them looks flipped, change the side option and re-upload.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>Runs 100% in your browser · No sign-in · No data leaves your device</p>
+  </footer>
+
+  <!-- Tesseract.js OCR engine (loaded from CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
