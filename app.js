@@ -112,6 +112,7 @@ function getWorker() {
 
 let lastLines = null;        // cached OCR lines so option changes re-render instantly
 let lastImageWidth = 0;
+let lastImageHeight = 0;
 
 async function handleFile(file) {
   if (!file || !file.type.startsWith('image/')) {
@@ -130,6 +131,7 @@ async function handleFile(file) {
     const { data } = await worker.recognize(file);
 
     lastImageWidth = data?.imageWidth || preview.naturalWidth || 1000;
+    lastImageHeight = data?.imageHeight || preview.naturalHeight || 1000;
     lastLines = (data.lines || [])
       .map((ln) => ({
         text: (ln.text || '').trim(),
@@ -149,6 +151,17 @@ async function handleFile(file) {
 
 function reRenderIfPossible() {
   if (lastLines) render();
+}
+
+// If we spot the match's name in the chat header and the user hasn't set a
+// "Their name" yet, fill it in automatically (they can still edit/clear it).
+function maybeAutoName(headerText) {
+  if (theirNameEl.value.trim()) return;
+  const m = headerText.match(/[A-Z][a-z]{1,}/);   // first Capitalized word
+  if (m) {
+    theirNameEl.value = m[0];
+    localStorage.setItem('theirName', m[0]);
+  }
 }
 
 // --- Junk cleaning ---------------------------------------------------------
@@ -242,8 +255,16 @@ function render() {
   const themLabel = (theirNameEl.value.trim() || 'Them');
 
   // 1) Filter + clean each line.
+  const H = lastImageHeight || 1000;
   const cleaned = [];
   for (const ln of lastLines) {
+    // Drop the conversation header at the very top (their name + "Online"),
+    // and grab their name from it if we don't have one yet.
+    if (doClean && (ln.y0 / H) < 0.12 &&
+        /\b(online|offline|active now|last seen|typing|away)\b/i.test(ln.text)) {
+      maybeAutoName(ln.text);
+      continue;
+    }
     if (doClean && isJunkLine(ln.text, ln.x0, ln.x1, lastImageWidth)) continue;
     const text = doClean ? cleanLine(ln.text) : ln.text;
     if (!text) continue;
