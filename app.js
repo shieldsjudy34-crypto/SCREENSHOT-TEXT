@@ -4,9 +4,19 @@
 // and cleans out timestamps / status-bar / app junk.
 
 // Register the service worker so the app is installable / loads offline-ish.
+// Always check for a newer version, and reload once when a new one takes over
+// so users never get stuck on a stale cached copy.
 if ('serviceWorker' in navigator) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+      .then((reg) => reg.update())
+      .catch(() => {});
   });
 }
 
@@ -22,6 +32,7 @@ const resetBtn   = document.getElementById('resetBtn');
 const mySideSel  = document.getElementById('mySide');
 const showLabels = document.getElementById('showLabels');
 const cleanJunk  = document.getElementById('cleanJunk');
+const combineShots = document.getElementById('combineShots');
 const myNameEl   = document.getElementById('myName');
 const theirNameEl = document.getElementById('theirName');
 
@@ -77,6 +88,8 @@ resetBtn.addEventListener('click', () => {
   fileInput.value = '';
   lastLines = null;
   lastImageWidth = 0;
+  priorText = '';
+  output.value = '';
 });
 
 copyBtn.addEventListener('click', async () => {
@@ -113,12 +126,17 @@ function getWorker() {
 let lastLines = null;        // cached OCR lines so option changes re-render instantly
 let lastImageWidth = 0;
 let lastImageHeight = 0;
+let priorText = '';          // transcript from earlier screenshots when combining
 
 async function handleFile(file) {
   if (!file || !file.type.startsWith('image/')) {
     alert('Please choose an image file (screenshot).');
     return;
   }
+
+  // When combining, keep whatever is already in the box (including your edits)
+  // and append this new screenshot to it.
+  priorText = (combineShots.checked && output.value.trim()) ? output.value.trim() : '';
 
   const url = URL.createObjectURL(file);
   preview.src = url;
@@ -286,7 +304,8 @@ function render() {
     return `${isMine ? meLabel : themLabel}: ${msg.text}`;
   });
 
-  output.value = blocks.join('\n\n');
+  const currentBlock = blocks.join('\n\n');
+  output.value = priorText ? (priorText + '\n\n' + currentBlock) : currentBlock;
 }
 
 // Group lines into messages.

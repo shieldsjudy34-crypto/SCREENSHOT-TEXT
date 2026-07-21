@@ -59,6 +59,10 @@
         <input type="checkbox" id="cleanJunk" checked />
         <span>Remove timestamps &amp; app junk</span>
       </label>
+      <label class="opt checkbox">
+        <input type="checkbox" id="combineShots" />
+        <span>Combine screenshots (add each new one to the transcript)</span>
+      </label>
     </section>
 
     <!-- Progress -->
@@ -82,7 +86,7 @@
           </div>
         </div>
         <textarea id="output" spellcheck="false" aria-label="Extracted chat text"></textarea>
-        <p class="hint">Tip: OCR isn't perfect. You can edit the text above before copying. If Me/Them looks flipped, change the side option and re-upload.</p>
+        <p class="hint">Tip: OCR isn't perfect — you can edit the text above before copying. If Me/Them looks flipped, change the side option and re-upload. Turn on <strong>Combine screenshots</strong> to add several screenshots of a long chat into one transcript; <strong>New image</strong> clears and starts over.</p>
       </div>
     </section>
   </main>
